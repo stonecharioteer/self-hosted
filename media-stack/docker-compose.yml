@@ -1,0 +1,154 @@
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin
+    network_mode: host
+    environment:
+      - TZ=Asia/Kolkata
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - ./jellyfin/config:/config
+      - /mnt/data/toshiba-4tb-001:/data
+      - type: tmpfs
+        target: /transcode
+        tmpfs:
+          size: 4g
+    devices:
+      - /dev/dri:/dev/dri   # Intel iGPU passthrough
+    restart: unless-stopped
+    # UI: http://<LXC-IP>:8096
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    network_mode: host
+    environment:
+      - TZ=Asia/Kolkata
+      - PUID=1000
+      - PGID=1000
+      - WEBUI_PORT=8080
+      - UMASK=002
+    volumes:
+      - ./qb/config:/config
+      - /mnt/data/toshiba-4tb-001:/data
+    restart: unless-stopped
+    # UI: http://<LXC-IP>:8080
+
+  samba:
+    image: dperson/samba:latest
+    container_name: samba
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+    volumes:
+      - /mnt/data/toshiba-4tb-001:/share
+    command: >
+      -p
+      -w "WORKGROUP"
+      -u "stonecharioteer;090223;1000;1000"
+      -s "Media;/share;yes;no;yes;stonecharioteer;stonecharioteer;stonecharioteer;Media library"
+      -g "force user = stonecharioteer"
+      -g "create mask = 0664"
+      -g "directory mask = 0775"
+
+  syncthing:
+    image: lscr.io/linuxserver/syncthing:latest
+    container_name: syncthing
+    network_mode: host
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+    volumes:
+      - ./syncthing/config:/config
+      - /mnt/data/toshiba-4tb-001/syncthing:/data/
+    restart: unless-stopped
+    # UI: http://192.168.100.230:8384
+
+  suwayomi:
+    image: ghcr.io/suwayomi/suwayomi-server:latest
+    container_name: suwayomi
+    network_mode: host                    # uses :4567 on the LXC IP
+    environment:
+      - TZ=Asia/Kolkata
+      - PUID=1000
+      - PGID=1000
+      # JSON array of extra extension repos (format per upstream docs)
+      - EXTENSION_REPOS=["https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.min.json"]
+    volumes:
+      - ./suwayomi/config:/config         # app config/db/backups
+      - /mnt/data/toshiba-4tb-001/suwayomi:/suwayomi   # your library
+    restart: unless-stopped
+    # UI/API: http://192.168.100.230:4567
+
+  freshrss:
+    image: freshrss/freshrss:latest
+    container_name: freshrss
+    restart: unless-stopped
+    ports:
+      - "18123:80"   # use your chosen unique port
+    environment:
+      - TZ=Asia/Kolkata
+      - CRON_MIN=*/20
+    volumes:
+      - /mnt/data/toshiba-4tb-001/self-hosted/freshrss/data:/var/www/FreshRSS/data
+      - /mnt/data/toshiba-4tb-001/self-hosted/freshrss/extensions:/var/www/FreshRSS/extensions
+    depends_on:
+      - freshrss-extensions
+
+  freshrss-extensions:
+    image: alpine/git:latest
+    container_name: freshrss-extensions
+    user: "1000:1000"
+    entrypoint: >
+      sh -c "
+        if [ ! -d /extensions/.git ]; then
+          git clone --depth=1 https://github.com/FreshRSS/Extensions.git /extensions;
+        else
+          cd /extensions && git pull;
+        fi
+      "
+    volumes:
+      - /mnt/data/toshiba-4tb-001/self-hosted/freshrss/extensions:/extensions
+    restart: "no"
+
+  karakeep-web:
+    image: ghcr.io/karakeep-app/karakeep:release
+    container_name: karakeep-web
+    restart: unless-stopped
+    volumes:
+      - ./karakeep/data:/data
+    ports:
+      - "23001:3000"
+    environment:
+      NEXTAUTH_SECRET: 09022023
+      NEXTAUTH_URL: http://192.168.100.230:23001
+      MEILI_ADDR: http://karakeep-meilisearch:7700
+      BROWSER_WEB_URL: http://karakeep-chrome:9222
+      DATA_DIR: /data
+      MEILI_MASTER_KEY: meilisecret123               # must match meilisearch below
+      # Optional: AI tagging
+      # OPENAI_API_KEY: your_api_key_here
+
+  karakeep-chrome:
+    image: gcr.io/zenika-hub/alpine-chrome:123
+    container_name: karakeep-chrome
+    restart: unless-stopped
+    shm_size: 2gb   # <-- important fix for Chrome crashes
+    command:
+      - --no-sandbox
+      - --disable-gpu
+      - --disable-dev-shm-usage
+
+  karakeep-meilisearch:
+    image: getmeili/meilisearch:latest
+    container_name: karakeep-meilisearch
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: meilisecret123
+    volumes:
+      - ./karakeep/meili_data:/meili_data
