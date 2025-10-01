@@ -1,0 +1,23 @@
+services:
+  syncthing:
+    image: lscr.io/linuxserver/syncthing:latest
+    container_name: syncthing
+    hostname: eqr5-syncthing
+    network_mode: host                     # best for discovery/perf
+    environment:
+      - PUID=1000                          # your uid
+      - PGID=1000                          # your gid
+      - TZ=Asia/Kolkata
+      - UMASK=002
+      - STGUIADDRESS=0.0.0.0:8384          # web UI on all IFs
+    volumes:
+      - ./config:/config                   # config kept in repo
+      - $HOME/syncthing:/data              # default folder root
+    restart: always                        # auto-restart, fault tolerant
+    healthcheck:
+      # Ensure syncthing process is alive; keeps Docker aware
+      test: ["CMD-SHELL", "pgrep -x syncthing >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
